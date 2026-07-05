@@ -13,6 +13,7 @@ from collections.abc import AsyncIterator
 
 import pytest
 import pytest_asyncio
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -22,6 +23,11 @@ from sqlalchemy.ext.asyncio import (
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
 
 requires_db = pytest.mark.skipif(not TEST_DATABASE_URL, reason="TEST_DATABASE_URL not set")
+
+_ALL_TABLES = (
+    "channels, videos, transcripts, chunks, knowledge_units, topics, "
+    "topic_articles, topic_relations, chat_sessions, chat_messages"
+)
 
 
 @pytest_asyncio.fixture
@@ -35,6 +41,10 @@ async def session() -> AsyncIterator[AsyncSession]:
         join_transaction_mode="create_savepoint",
     )
     db = maker()
+    # Start every test from an empty schema, even if the DB carries committed
+    # rows from a manual run. Runs inside the outer transaction → rolled back at
+    # teardown, so any real data is left untouched.
+    await db.execute(text(f"TRUNCATE {_ALL_TABLES} RESTART IDENTITY CASCADE"))
     try:
         yield db
     finally:

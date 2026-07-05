@@ -14,7 +14,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ytkb.db import search
 from ytkb.db.base import get_session
-from ytkb.db.models import Chunk, KnowledgeUnit, Topic, TopicArticle, TopicStatus, Video
+from ytkb.db.models import (
+    Channel,
+    Chunk,
+    KnowledgeUnit,
+    Topic,
+    TopicArticle,
+    TopicRelation,
+    TopicStatus,
+    Transcript,
+    Video,
+)
 from ytkb.indexing.embeddings import get_embedding_client
 
 router = APIRouter(prefix="/kb", tags=["kb"])
@@ -44,6 +54,42 @@ async def list_topics(
     ]
 
 
+@router.get("/tree")
+async def topic_tree(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> list[dict]:
+    """Topic hierarchy (parent_id) as a nested tree; merged topics excluded."""
+    topics = (
+        (
+            await session.execute(
+                select(Topic).where(Topic.status != TopicStatus.merged_into).order_by(Topic.title)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    def node(t: Topic) -> dict:
+        return {
+            "id": t.id,
+            "slug": t.slug,
+            "title": t.title,
+            "status": t.status.value,
+            "units_count": t.units_count,
+            "children": [],
+        }
+
+    by_id = {t.id: node(t) for t in topics}
+    roots: list[dict] = []
+    for t in topics:
+        n = by_id[t.id]
+        if t.parent_id and t.parent_id in by_id:
+            by_id[t.parent_id]["children"].append(n)
+        else:
+            roots.append(n)
+    return roots
+
+
 @router.get("/topics/{slug}")
 async def get_topic(
     slug: str,
@@ -65,12 +111,27 @@ async def get_topic(
         .scalars()
         .first()
     )
+    # Related topics (either direction of the relation).
+    rel_rows = await session.execute(
+        select(TopicRelation).where(
+            (TopicRelation.topic_a == topic.id) | (TopicRelation.topic_b == topic.id)
+        )
+    )
+    related_ids = set()
+    for rel in rel_rows.scalars():
+        related_ids.add(rel.topic_b if rel.topic_a == topic.id else rel.topic_a)
+    related = []
+    if related_ids:
+        rows = await session.execute(select(Topic).where(Topic.id.in_(related_ids)))
+        related = [{"id": t.id, "slug": t.slug, "title": t.title} for t in rows.scalars()]
+
     return {
         "id": topic.id,
         "slug": topic.slug,
         "title": topic.title,
         "status": topic.status.value,
         "units_count": topic.units_count,
+        "related": related,
         "article": None
         if article is None
         else {
@@ -80,6 +141,32 @@ async def get_topic(
             "units_included": article.units_included,
             "created_at": article.created_at,
         },
+    }
+
+
+@router.get("/topics/{slug}/versions/{version}")
+async def get_topic_version(
+    slug: str,
+    version: int,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> dict:
+    """A specific article version — lets the frontend diff two versions."""
+    topic = await session.scalar(select(Topic).where(Topic.slug == slug))
+    if topic is None:
+        raise HTTPException(status_code=404, detail="topic not found")
+    article = await session.scalar(
+        select(TopicArticle).where(
+            TopicArticle.topic_id == topic.id, TopicArticle.version == version
+        )
+    )
+    if article is None:
+        raise HTTPException(status_code=404, detail="version not found")
+    return {
+        "version": article.version,
+        "content_md": article.content_md,
+        "change_summary": article.change_summary,
+        "units_included": article.units_included,
+        "created_at": article.created_at,
     }
 
 
@@ -141,22 +228,100 @@ async def get_unit(
 
 
 @router.get("/search")
-async def search_chunks(
+async def search_kb(
     session: Annotated[AsyncSession, Depends(get_session)],
     q: Annotated[str, Query(min_length=1)],
-    mode: Literal["hybrid", "semantic", "fts"] = "hybrid",
+    chunk_mode: Literal["hybrid", "semantic", "fts"] = "hybrid",
     limit: Annotated[int, Query(le=100)] = 10,
 ) -> dict:
-    """Search transcript chunks. No LLM: semantic modes embed the query once."""
-    if mode == "fts":
-        hits = await search.fts_chunks(session, q, limit=limit)
+    """Unified KB search, grouped by type (topics / units / chunks). No LLM:
+    the query is embedded once (an embedding model, not an LLM)."""
+    query_vec = await get_embedding_client().embed_one(q)
+    topics = await search.hybrid_topics(session, q, query_vec, limit=limit)
+    units = await search.hybrid_units(session, q, query_vec, limit=limit)
+    if chunk_mode == "fts":
+        chunks = await search.fts_chunks(session, q, limit=limit)
+    elif chunk_mode == "semantic":
+        chunks = await search.semantic_chunks(session, query_vec, limit=limit)
     else:
-        query_vec = await get_embedding_client().embed_one(q)
-        if mode == "semantic":
-            hits = await search.semantic_chunks(session, query_vec, limit=limit)
-        else:
-            hits = await search.hybrid_chunks(session, q, query_vec, limit=limit)
-    return {"query": q, "mode": mode, "results": [h.as_dict() for h in hits]}
+        chunks = await search.hybrid_chunks(session, q, query_vec, limit=limit)
+    return {
+        "query": q,
+        "results": {
+            "topics": [h.as_dict() for h in topics],
+            "units": [h.as_dict() for h in units],
+            "chunks": [h.as_dict() for h in chunks],
+        },
+    }
+
+
+@router.get("/sources")
+async def list_sources(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> list[dict]:
+    """Source index: channels with video counts (channels → videos → units)."""
+    channels = (await session.execute(select(Channel).order_by(Channel.title))).scalars().all()
+    out = []
+    for c in channels:
+        total = await session.scalar(select(func.count(Video.id)).where(Video.channel_id == c.id))
+        out.append(
+            {
+                "id": c.id,
+                "yt_channel_id": c.yt_channel_id,
+                "handle": c.handle,
+                "title": c.title,
+                "videos_total": total or 0,
+            }
+        )
+    return out
+
+
+@router.get("/videos/{yt_video_id}")
+async def get_video(
+    yt_video_id: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> dict:
+    """A video's page: metadata, transcript segments, and where its content
+    ended up (the knowledge units extracted from it, with their topic)."""
+    video = await session.scalar(select(Video).where(Video.yt_video_id == yt_video_id))
+    if video is None:
+        raise HTTPException(status_code=404, detail="video not found")
+    transcript = (
+        (
+            await session.execute(
+                select(Transcript)
+                .where(Transcript.video_id == video.id)
+                .order_by(Transcript.id.desc())
+            )
+        )
+        .scalars()
+        .first()
+    )
+    segments = (transcript.raw_json or {}).get("segments", []) if transcript else []
+
+    unit_rows = await session.execute(
+        select(KnowledgeUnit, Topic.slug)
+        .join(Topic, Topic.id == KnowledgeUnit.topic_id, isouter=True)
+        .where(KnowledgeUnit.video_id == video.id)
+        .order_by(KnowledgeUnit.id)
+    )
+    units = [
+        {
+            "id": u.id,
+            "text": u.text,
+            "unit_type": u.unit_type.value,
+            "topic_slug": slug,
+        }
+        for u, slug in unit_rows
+    ]
+    return {
+        "yt_video_id": video.yt_video_id,
+        "title": video.title,
+        "url": video.url,
+        "ingest_status": video.ingest_status.value,
+        "segments": segments,
+        "units": units,
+    }
 
 
 @router.get("/stats")
