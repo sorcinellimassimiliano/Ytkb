@@ -30,7 +30,7 @@ o modelli locali piccoli; ASR fallback via `faster-whisper` int8 o cloud).
 | Fase | Descrizione | Stato |
 |---|---|---|
 | 0 | Bootstrap: monorepo, Docker Compose, schema completo (Alembic), `/health`, CI | ✅ completata |
-| 1 | Ingestion fonte (YouTube provider, trascrizioni, scheduler, CLI) | 🟡 fondamenta pronte |
+| 1 | Ingestion fonte (YouTube provider, trascrizioni, service idempotente, scheduler, CLI) | ✅ completata |
 | 2 | Chunking timestamp-aware + embedding su pgvector | 🟡 chunker + client embedding pronti |
 | 3 | Estrazione unità di conoscenza (Haiku) | ⬜ |
 | 4 | Assegnazione argomenti + merge incrementale | ⬜ |
@@ -69,11 +69,18 @@ uvicorn ytkb.api.app:app --reload
 ## CLI
 
 ```bash
-ytkb add-channel @creator        # registra un canale
-ytkb ingest @creator --limit 20  # scopre video + scarica trascrizioni
-ytkb status                      # conteggi pipeline per stato
-ytkb scheduler                   # scan notturni in-process (APScheduler)
+ytkb add-channel @creator             # registra un canale
+ytkb ingest @creator --limit 20       # scopre video + scarica trascrizioni
+ytkb ingest @creator --retry-errors   # riprova i video andati in errore
+ytkb scan                             # una scansione ora per tutti i canali attivi
+ytkb status                           # conteggi pipeline per stato
+ytkb scheduler                        # scan notturni in-process (APScheduler)
 ```
+
+> **Nota rete**: l'ingestione live richiede accesso a `youtube.com`. In ambienti
+> con IP datacenter YouTube applica rate limiting: configura `YT_DLP_COOKIES_FILE`
+> / `YT_DLP_PROXY`. La macchina a stati e l'idempotenza della pipeline sono
+> coperte da test di integrazione contro Postgres reale (provider fittizio).
 
 ## Qualità
 

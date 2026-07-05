@@ -11,6 +11,23 @@ jobs:
     defaults:
       run:
         working-directory: backend
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: ytkb
+          POSTGRES_PASSWORD: ytkb
+          POSTGRES_DB: ytkb
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ytkb -d ytkb"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+asyncpg://ytkb:ytkb@localhost:5432/ytkb
+      TEST_DATABASE_URL: postgresql+asyncpg://ytkb:ytkb@localhost:5432/ytkb
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -26,5 +43,11 @@ jobs:
           ruff format --check src tests
       - name: Types (mypy)
         run: mypy src
+      - name: Enable extensions
+        run: |
+          PGPASSWORD=ytkb psql -h localhost -U ytkb -d ytkb \
+            -c "CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm;"
+      - name: Migrate
+        run: alembic upgrade head
       - name: Tests
         run: pytest -q

@@ -25,7 +25,13 @@ T = TypeVar("T")
 
 def _run(coro: Callable[[], Coroutine[Any, Any, T]]) -> T:
     configure_logging()
-    return asyncio.run(coro())
+    try:
+        return asyncio.run(coro())
+    except Exception as exc:
+        # Surface network / provider failures as a clean CLI error, not a
+        # traceback. Rate limiting from datacenter IPs is expected here.
+        typer.secho(f"Error: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(1) from exc
 
 
 @app.command()
@@ -47,6 +53,7 @@ def ingest(
     handle_or_id: str = typer.Argument(None, help="Channel to ingest; omit for all active"),
     limit: int = typer.Option(None, help="Max videos to discover per channel"),
     transcribe: bool = typer.Option(True, help="Fetch transcripts for pending videos"),
+    retry_errors: bool = typer.Option(False, help="Also retry videos in 'error' state"),
 ) -> None:
     """Discover videos for a channel and fetch transcripts."""
 
@@ -60,10 +67,26 @@ def ingest(
                 typer.echo(f"Discovered {len(new)} new videos.")
             if transcribe:
                 n = await transcribe_pending(
-                    session, provider, languages=settings.transcript_languages, limit=limit
+                    session,
+                    provider,
+                    languages=settings.transcript_languages,
+                    limit=limit,
+                    include_errors=retry_errors,
                 )
                 typer.echo(f"Transcribed {n} videos.")
             await session.commit()
+
+    _run(_do)
+
+
+@app.command()
+def scan() -> None:
+    """Run one channel scan now (discover + transcribe for all active channels)."""
+    from ytkb.ingestion.scheduler import scan_all_channels
+
+    async def _do() -> None:
+        await scan_all_channels()
+        typer.echo("Scan complete.")
 
     _run(_do)
 
