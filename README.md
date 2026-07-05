@@ -1,0 +1,87 @@
+# YT-KB — Memoria totale per argomento da contenuti YouTube
+
+YT-KB non è un semplice RAG "chunk di video → chat". È una **memoria totale
+organizzata per argomenti**: ogni video viene decomposto in unità di conoscenza
+atomiche, assegnate ad argomenti e fuse incrementalmente in **articoli-argomento
+viventi**, versionati, con provenienza completa (video + timestamp per ogni
+affermazione). La KB è **navigabile e ricercabile senza alcun LLM**; la chat è un
+layer opzionale.
+
+## Architettura a due layer
+
+```
+LAYER FONTE (provenienza, immutabile)
+  channels → videos → transcripts → chunks (+ embedding pgvector)
+           │  estrazione LLM (batch, Haiku)
+           ▼
+LAYER CONOSCENZA (vivente, incrementale)
+  knowledge_units (+ embedding)
+           │  assegnazione argomento (similarità + arbitraggio LLM)
+           ▼
+  topics ──── topic_articles (versionati, markdown, con citazioni)
+```
+
+Un **solo datastore**: PostgreSQL 16 + pgvector (vettori HNSW, FTS `tsvector`,
+trigram, relazionale, stato pipeline). Pipeline **CPU-only** (embeddings via API
+o modelli locali piccoli; ASR fallback via `faster-whisper` int8 o cloud).
+
+## Stato di sviluppo
+
+| Fase | Descrizione | Stato |
+|---|---|---|
+| 0 | Bootstrap: monorepo, Docker Compose, schema completo (Alembic), `/health`, CI | ✅ completata |
+| 1 | Ingestion fonte (YouTube provider, trascrizioni, scheduler, CLI) | 🟡 fondamenta pronte |
+| 2 | Chunking timestamp-aware + embedding su pgvector | 🟡 chunker + client embedding pronti |
+| 3 | Estrazione unità di conoscenza (Haiku) | ⬜ |
+| 4 | Assegnazione argomenti + merge incrementale | ⬜ |
+| 5 | KB browser senza LLM | 🟡 scaffold API + frontend |
+| 6 | Chat LLM opzionale | ⬜ |
+| 7 | Fallback ASR CPU/cloud | ⬜ |
+| 8 | Hardening | ⬜ |
+
+Vedi [`docs/piano-progetto.md`](docs/piano-progetto.md) per il piano completo e
+[`docs/runbook.md`](docs/runbook.md) per le operazioni.
+
+## Avvio rapido (Docker)
+
+```bash
+cp .env.example .env
+make dev          # postgres(+pgvector) + backend (migra e serve) + worker + frontend
+```
+
+- Backend: http://localhost:8000 — `GET /health` verifica DB ed estensioni.
+- Frontend: http://localhost:5173
+- Docs API: http://localhost:8000/docs
+
+## Sviluppo backend (senza Docker)
+
+Richiede un Postgres 16 con `vector` e `pg_trgm` (vedi `db/init/`).
+
+```bash
+cd backend
+python -m venv .venv && . .venv/bin/activate
+pip install -e ".[dev]"
+export DATABASE_URL="postgresql+asyncpg://ytkb:ytkb@localhost:5432/ytkb"
+alembic upgrade head
+uvicorn ytkb.api.app:app --reload
+```
+
+## CLI
+
+```bash
+ytkb add-channel @creator        # registra un canale
+ytkb ingest @creator --limit 20  # scopre video + scarica trascrizioni
+ytkb status                      # conteggi pipeline per stato
+ytkb scheduler                   # scan notturni in-process (APScheduler)
+```
+
+## Qualità
+
+```bash
+make test   # pytest
+make lint   # ruff check + ruff format --check + mypy
+```
+
+Regole di progetto in [`CLAUDE.md`](CLAUDE.md). Vincoli chiave: un solo datastore,
+dimensione embedding fissata in migrazione `0001`, layer conoscenza append-only,
+`/kb/*` mai chiama un LLM, idempotenza ovunque.
