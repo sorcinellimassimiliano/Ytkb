@@ -50,6 +50,11 @@ class Settings(BaseSettings):
     chunk_target_tokens: int = 500
     chunk_overlap_ratio: float = 0.15
 
+    # --- Knowledge unit extraction -----------------------------------------
+    extraction_window_size: int = 4  # chunks per extraction window
+    extraction_min_confidence: float = 0.35
+    unit_near_dup_threshold: float = 0.93  # cosine similarity to treat as dup
+
     # --- Topic assignment thresholds ---------------------------------------
     theta_high: float = 0.82
     theta_low: float = 0.62

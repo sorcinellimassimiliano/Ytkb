@@ -123,6 +123,22 @@ def reindex_video(yt_video_id: str) -> None:
 
 
 @app.command()
+def extract_units(
+    limit: int = typer.Option(None, help="Max embedded videos to process"),
+) -> None:
+    """Extract knowledge units from embedded videos (embedded → units_extracted)."""
+    from ytkb.knowledge.extraction import extract_pending
+
+    async def _do() -> None:
+        async with get_sessionmaker()() as session:
+            totals = await extract_pending(session, limit=limit)
+            await session.commit()
+            typer.echo(f"Extracted {totals['units']} units from {totals['videos']} videos.")
+
+    _run(_do)
+
+
+@app.command()
 def search(
     query: str,
     mode: str = typer.Option("hybrid", help="hybrid | semantic | fts"),

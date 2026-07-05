@@ -32,7 +32,7 @@ o modelli locali piccoli; ASR fallback via `faster-whisper` int8 o cloud).
 | 0 | Bootstrap: monorepo, Docker Compose, schema completo (Alembic), `/health`, CI | ✅ completata |
 | 1 | Ingestion fonte (YouTube provider, trascrizioni, service idempotente, scheduler, CLI) | ✅ completata |
 | 2 | Chunking timestamp-aware + embedding su pgvector + ricerca kNN/FTS/ibrida | ✅ completata |
-| 3 | Estrazione unità di conoscenza (Haiku) | ⬜ |
+| 3 | Estrazione unità di conoscenza (LLM astratto + euristico offline, golden test) | ✅ completata |
 | 4 | Assegnazione argomenti + merge incrementale | ⬜ |
 | 5 | KB browser senza LLM | 🟡 scaffold API + frontend |
 | 6 | Chat LLM opzionale | ⬜ |
@@ -75,6 +75,7 @@ ytkb ingest @creator --retry-errors   # riprova i video andati in errore
 ytkb scan                             # una scansione ora per tutti i canali attivi
 ytkb index --limit 50                 # chunk + embedding dei video trascritti
 ytkb reindex-video <yt_video_id>      # re-chunk + re-embed pulito di un video
+ytkb extract-units --limit 50         # estrae unità di conoscenza (embedded → units_extracted)
 ytkb search "prompt caching" --mode hybrid   # ricerca chunk (fts|semantic|hybrid)
 ytkb status                           # conteggi pipeline per stato
 ytkb scheduler                        # scan notturni in-process (APScheduler)

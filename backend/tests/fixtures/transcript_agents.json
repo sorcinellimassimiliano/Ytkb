@@ -1,0 +1,25 @@
+{
+  "video_title": "Context management negli agenti LLM",
+  "segments": [
+    {
+      "start_s": 0.0,
+      "end_s": 8.0,
+      "text": "Benvenuti nel canale, iscrivetevi e attivate la campanella per non perdervi i prossimi video."
+    },
+    {
+      "start_s": 8.0,
+      "end_s": 20.0,
+      "text": "Il context management negli agenti LLM significa decidere quali informazioni restano nella finestra di contesto. Come puoi ridurre i token consumati, basta riassumere periodicamente i messaggi vecchi in un sommario compatto."
+    },
+    {
+      "start_s": 20.0,
+      "end_s": 32.0,
+      "text": "Un tool molto utile per gestire questo problema è una libreria di prompt caching che riusa il contesto tra chiamate. Per esempio, un agente che scrive codice puo mantenere in memoria soltanto gli ultimi tre file aperti dall'utente."
+    }
+  ],
+  "expected": {
+    "min_units": 4,
+    "types_present": ["definition", "technique", "tool", "example"],
+    "must_exclude_substrings": ["iscriv", "campanella"]
+  }
+}
