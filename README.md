@@ -34,8 +34,8 @@ o modelli locali piccoli; ASR fallback via `faster-whisper` int8 o cloud).
 | 2 | Chunking timestamp-aware + embedding su pgvector + ricerca kNN/FTS/ibrida | ✅ completata |
 | 3 | Estrazione unità di conoscenza (LLM astratto + euristico offline, golden test) | ✅ completata |
 | 4a | Assegnazione argomenti (matcher kNN, soglie, arbitraggio, centroidi incrementali) | ✅ completata |
-| 4b | Merge incrementale articoli-argomento versionati + validatore citazioni | ⬜ |
-| 5 | KB browser senza LLM | 🟡 scaffold API + frontend |
+| 4b | Merge incrementale articoli versionati + validatore citazioni + topics-review | ✅ completata |
+| 5 | KB browser senza LLM (API articoli/versioni/provenienza + frontend) | 🟡 API pronte, frontend base |
 | 6 | Chat LLM opzionale | ⬜ |
 | 7 | Fallback ASR CPU/cloud | ⬜ |
 | 8 | Hardening | ⬜ |
@@ -78,6 +78,10 @@ ytkb index --limit 50                 # chunk + embedding dei video trascritti
 ytkb reindex-video <yt_video_id>      # re-chunk + re-embed pulito di un video
 ytkb extract-units --limit 50         # estrae unità di conoscenza (embedded → units_extracted)
 ytkb assign --limit 200               # assegna le unità agli argomenti (matcher + arbitraggio)
+ytkb merge                            # fonde le nuove unità negli articoli-argomento (nuova versione)
+ytkb rebuild-topic <slug>             # re-sintesi pulita dell'articolo da tutte le unità
+ytkb topics-review                    # propone fusioni di argomenti quasi-duplicati (solo detection)
+ytkb merge-topics <from> <into>       # fusione manuale di argomenti con remap unità
 ytkb search "prompt caching" --mode hybrid   # ricerca chunk (fts|semantic|hybrid)
 ytkb status                           # conteggi pipeline per stato
 ytkb scheduler                        # scan notturni in-process (APScheduler)

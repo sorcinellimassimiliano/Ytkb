@@ -8,13 +8,13 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ytkb.db import search
 from ytkb.db.base import get_session
-from ytkb.db.models import Topic, TopicStatus
+from ytkb.db.models import Chunk, KnowledgeUnit, Topic, TopicArticle, TopicStatus, Video
 from ytkb.indexing.embeddings import get_embedding_client
 
 router = APIRouter(prefix="/kb", tags=["kb"])
@@ -42,6 +42,102 @@ async def list_topics(
         }
         for t in result.scalars()
     ]
+
+
+@router.get("/topics/{slug}")
+async def get_topic(
+    slug: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> dict:
+    """Topic page: metadata + the current (latest) article version."""
+    topic = await session.scalar(select(Topic).where(Topic.slug == slug))
+    if topic is None:
+        raise HTTPException(status_code=404, detail="topic not found")
+    article = (
+        (
+            await session.execute(
+                select(TopicArticle)
+                .where(TopicArticle.topic_id == topic.id)
+                .order_by(TopicArticle.version.desc())
+                .limit(1)
+            )
+        )
+        .scalars()
+        .first()
+    )
+    return {
+        "id": topic.id,
+        "slug": topic.slug,
+        "title": topic.title,
+        "status": topic.status.value,
+        "units_count": topic.units_count,
+        "article": None
+        if article is None
+        else {
+            "version": article.version,
+            "content_md": article.content_md,
+            "change_summary": article.change_summary,
+            "units_included": article.units_included,
+            "created_at": article.created_at,
+        },
+    }
+
+
+@router.get("/topics/{slug}/versions")
+async def get_topic_versions(
+    slug: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> list[dict]:
+    topic = await session.scalar(select(Topic).where(Topic.slug == slug))
+    if topic is None:
+        raise HTTPException(status_code=404, detail="topic not found")
+    rows = await session.execute(
+        select(TopicArticle)
+        .where(TopicArticle.topic_id == topic.id)
+        .order_by(TopicArticle.version.desc())
+    )
+    return [
+        {
+            "version": a.version,
+            "change_summary": a.change_summary,
+            "units_included": len(a.units_included),
+            "created_at": a.created_at,
+        }
+        for a in rows.scalars()
+    ]
+
+
+@router.get("/units/{unit_id}")
+async def get_unit(
+    unit_id: int,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> dict:
+    """Resolve a [unit:ID] citation to its provenance: video + chunk timestamps,
+    so the renderer can link to YouTube at the exact moment."""
+    unit = await session.get(KnowledgeUnit, unit_id)
+    if unit is None:
+        raise HTTPException(status_code=404, detail="unit not found")
+    video = await session.get(Video, unit.video_id)
+    chunks = []
+    if unit.chunk_ids:
+        rows = await session.execute(
+            select(Chunk).where(Chunk.id.in_(unit.chunk_ids)).order_by(Chunk.start_s)
+        )
+        chunks = [{"id": c.id, "start_s": c.start_s, "end_s": c.end_s} for c in rows.scalars()]
+    return {
+        "id": unit.id,
+        "text": unit.text,
+        "unit_type": unit.unit_type.value,
+        "topic_id": unit.topic_id,
+        "video": None
+        if video is None
+        else {
+            "yt_video_id": video.yt_video_id,
+            "title": video.title,
+            "url": video.url,
+        },
+        "chunks": chunks,
+    }
 
 
 @router.get("/search")

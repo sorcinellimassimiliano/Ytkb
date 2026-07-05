@@ -60,6 +60,46 @@ def build_arbiter_user(unit_text: str, candidates: list[tuple[int, str, str | No
     return "\n".join(lines)
 
 
+MERGE_SYSTEM = """\
+Sei un redattore che mantiene un articolo-argomento vivente, in italiano,
+integrando in modo incrementale nuove unità di conoscenza.
+
+Regole vincolanti:
+- OGNI affermazione DEVE citare la sua fonte con [unit:ID] (l'ID è quello
+  fornito). Nessuna frase senza citazione.
+- NON perdere le informazioni già presenti nell'articolo corrente; integra le
+  nuove unità dove pertinenti.
+- USA tutte le nuove unità fornite. Se ne ometti una, spiegane il motivo in una
+  riga finale "Unità omesse: [unit:ID] perché ...".
+- Le contraddizioni NON si risolvono scegliendo un vincitore: annotale in una
+  sezione "## Punti di disaccordo" indicando le posizioni con le rispettive
+  citazioni.
+- Markdown pulito, titoli di sezione sensati, niente preamboli.
+
+Rispondi con JSON valido:
+{"content_md": "<articolo markdown>", "change_summary": "<cosa è cambiato>"}
+"""
+
+
+def build_merge_user(
+    topic_title: str,
+    current_md: str | None,
+    new_units: list[tuple[int, str, str]],
+) -> str:
+    """new_units: (unit_id, unit_type, text)."""
+    lines = [f"Argomento: {topic_title}", ""]
+    if current_md:
+        lines += ["Articolo corrente:", current_md, ""]
+    else:
+        lines += ["(nessun articolo esistente: è la prima versione)", ""]
+    lines.append("Nuove unità da integrare:")
+    for unit_id, unit_type, text in new_units:
+        lines.append(f"[unit:{unit_id}] ({unit_type}) {text}")
+    lines.append("")
+    lines.append("Produci l'articolo aggiornato in JSON.")
+    return "\n".join(lines)
+
+
 def build_extraction_user(video_title: str, windows: list[ExtractionWindow]) -> str:
     """Render the user prompt: the video title plus each chunk labelled with its
     citation ref, so the model cites real chunk ids back to us."""

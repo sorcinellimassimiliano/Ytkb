@@ -59,6 +59,7 @@ class Settings(BaseSettings):
     theta_high: float = 0.82
     theta_low: float = 0.62
     topic_promote_after_units: int = 5
+    topic_similarity_review_threshold: float = 0.9  # centroid sim to propose merge
 
     # --- ASR fallback -------------------------------------------------------
     asr_provider: Literal["faster_whisper", "assemblyai", "openai", "none"] = "none"

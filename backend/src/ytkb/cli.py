@@ -155,6 +155,67 @@ def assign(limit: int = typer.Option(None, help="Max pending units to assign")) 
 
 
 @app.command()
+def merge() -> None:
+    """Merge new units into topic articles (dirty topics → new article version)."""
+    from ytkb.knowledge.merge import merge_dirty_topics
+
+    async def _do() -> None:
+        async with get_sessionmaker()() as session:
+            res = await merge_dirty_topics(session)
+            await session.commit()
+            typer.echo(f"Merged {res['topics_merged']} topics.")
+
+    _run(_do)
+
+
+@app.command()
+def rebuild_topic(slug: str) -> None:
+    """Re-synthesize a topic's article from scratch (new version, all units)."""
+    from ytkb.knowledge.merge import rebuild_topic as _rebuild
+
+    async def _do() -> None:
+        async with get_sessionmaker()() as session:
+            article = await _rebuild(session, slug)
+            await session.commit()
+            if article is None:
+                typer.echo(f"{slug}: no units to rebuild.")
+            else:
+                typer.echo(f"{slug}: rebuilt as version {article.version}.")
+
+    _run(_do)
+
+
+@app.command()
+def topics_review() -> None:
+    """Propose merges for near-duplicate topics (detection only)."""
+    from ytkb.knowledge.review import find_similar_topics
+
+    async def _do() -> None:
+        async with get_sessionmaker()() as session:
+            pairs = await find_similar_topics(session)
+            if not pairs:
+                typer.echo("No near-duplicate topics found.")
+            for p in pairs:
+                typer.echo(f"{p.similarity:.3f}  {p.topic_a_slug}  ~  {p.topic_b_slug}")
+
+    _run(_do)
+
+
+@app.command()
+def merge_topics(from_slug: str, into_slug: str) -> None:
+    """Manually merge one topic into another, remapping its units."""
+    from ytkb.knowledge.review import merge_topics as _merge_topics
+
+    async def _do() -> None:
+        async with get_sessionmaker()() as session:
+            res = await _merge_topics(session, from_slug, into_slug)
+            await session.commit()
+            typer.echo(f"Remapped {res['units_remapped']} units: {from_slug} → {into_slug}.")
+
+    _run(_do)
+
+
+@app.command()
 def search(
     query: str,
     mode: str = typer.Option("hybrid", help="hybrid | semantic | fts"),
