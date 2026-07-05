@@ -92,6 +92,63 @@ def scan() -> None:
 
 
 @app.command()
+def index(limit: int = typer.Option(None, help="Max transcribed videos to process")) -> None:
+    """Chunk + embed all transcribed videos (transcribed → chunked → embedded)."""
+    from ytkb.indexing.pipeline import index_transcribed
+
+    async def _do() -> None:
+        async with get_sessionmaker()() as session:
+            totals = await index_transcribed(session, limit=limit)
+            await session.commit()
+            typer.echo(
+                f"Indexed {totals['videos']} videos, "
+                f"{totals['chunks']} chunks, {totals['embedded']} embeddings."
+            )
+
+    _run(_do)
+
+
+@app.command()
+def reindex_video(yt_video_id: str) -> None:
+    """Force a clean re-chunk + re-embed of a single video."""
+    from ytkb.indexing.pipeline import reindex_video as _reindex
+
+    async def _do() -> None:
+        async with get_sessionmaker()() as session:
+            res = await _reindex(session, yt_video_id)
+            await session.commit()
+            typer.echo(f"{res['video']}: {res['chunks']} chunks, {res['embedded']} embeddings.")
+
+    _run(_do)
+
+
+@app.command()
+def search(
+    query: str,
+    mode: str = typer.Option("hybrid", help="hybrid | semantic | fts"),
+    limit: int = typer.Option(10),
+) -> None:
+    """Search transcript chunks from the CLI (no LLM)."""
+    from ytkb.db import search as search_svc
+    from ytkb.indexing.embeddings import get_embedding_client
+
+    async def _do() -> None:
+        async with get_sessionmaker()() as session:
+            if mode == "fts":
+                hits = await search_svc.fts_chunks(session, query, limit=limit)
+            else:
+                vec = await get_embedding_client().embed_one(query)
+                if mode == "semantic":
+                    hits = await search_svc.semantic_chunks(session, vec, limit=limit)
+                else:
+                    hits = await search_svc.hybrid_chunks(session, query, vec, limit=limit)
+            for h in hits:
+                typer.echo(f"[{h.score:.4f}] v{h.video_id} {h.start_s:.0f}s  {h.text[:80]}")
+
+    _run(_do)
+
+
+@app.command()
 def status() -> None:
     """Show pipeline counts by ingest status."""
     from sqlalchemy import func, select

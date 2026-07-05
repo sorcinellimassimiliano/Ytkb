@@ -1,9 +1,19 @@
-"""In-memory SourceProvider for deterministic, offline pipeline tests."""
+"""In-memory SourceProvider and DB seeding helpers for offline pipeline tests."""
 
 from __future__ import annotations
 
 from collections.abc import Iterable
 
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ytkb.db.models import (
+    Channel,
+    IngestStatus,
+    Transcript,
+    TranscriptSource,
+    Video,
+)
 from ytkb.ingestion.providers.base import (
     SourceProvider,
     TranscriptResult,
@@ -40,3 +50,44 @@ class FakeProvider(SourceProvider):
         if isinstance(value, Exception):
             raise value
         return value
+
+
+async def seed_transcribed_video(
+    session: AsyncSession,
+    *,
+    yt_video_id: str,
+    segments: list[tuple[float, float, str]],
+    channel_yt_id: str = "UCseed",
+) -> Video:
+    """Insert a channel (if needed), a video in `transcribed` state, and a
+    transcript with the given segments. Returns the flushed Video."""
+    channel = await session.scalar(select(Channel).where(Channel.yt_channel_id == channel_yt_id))
+    if channel is None:
+        channel = Channel(yt_channel_id=channel_yt_id, title="Seed")
+        session.add(channel)
+        await session.flush()
+    channel_id = channel.id
+
+    video = Video(
+        yt_video_id=yt_video_id,
+        channel_id=channel_id,
+        title=f"Video {yt_video_id}",
+        ingest_status=IngestStatus.transcribed,
+    )
+    session.add(video)
+    await session.flush()
+
+    session.add(
+        Transcript(
+            video_id=video.id,
+            language="it",
+            source=TranscriptSource.yt_manual,
+            raw_json={
+                "language": "it",
+                "source": "yt_manual",
+                "segments": [{"start_s": s, "end_s": e, "text": t} for s, e, t in segments],
+            },
+        )
+    )
+    await session.flush()
+    return video
