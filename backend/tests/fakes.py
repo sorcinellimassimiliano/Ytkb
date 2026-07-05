@@ -8,10 +8,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ytkb.db.models import (
+    Assignment,
     Channel,
     IngestStatus,
+    KnowledgeUnit,
     Transcript,
     TranscriptSource,
+    UnitType,
     Video,
 )
 from ytkb.ingestion.providers.base import (
@@ -19,6 +22,7 @@ from ytkb.ingestion.providers.base import (
     TranscriptResult,
     VideoRef,
 )
+from ytkb.knowledge.hashing import unit_content_hash
 
 
 class FakeProvider(SourceProvider):
@@ -91,3 +95,50 @@ async def seed_transcribed_video(
     )
     await session.flush()
     return video
+
+
+async def seed_bare_video(
+    session: AsyncSession,
+    *,
+    yt_video_id: str,
+    status: IngestStatus = IngestStatus.units_extracted,
+    channel_yt_id: str = "UCunits",
+) -> Video:
+    """A video row with no transcript/chunks — for assignment-layer tests."""
+    channel = await session.scalar(select(Channel).where(Channel.yt_channel_id == channel_yt_id))
+    if channel is None:
+        channel = Channel(yt_channel_id=channel_yt_id, title="Units")
+        session.add(channel)
+        await session.flush()
+    video = Video(
+        yt_video_id=yt_video_id,
+        channel_id=channel.id,
+        title=f"Video {yt_video_id}",
+        ingest_status=status,
+    )
+    session.add(video)
+    await session.flush()
+    return video
+
+
+async def seed_unit(
+    session: AsyncSession,
+    *,
+    video: Video,
+    text: str,
+    embedding: list[float],
+    unit_type: UnitType = UnitType.claim,
+) -> KnowledgeUnit:
+    """Insert a pending knowledge unit with a chosen embedding."""
+    unit = KnowledgeUnit(
+        content_hash=unit_content_hash(text, unit_type.value),
+        video_id=video.id,
+        chunk_ids=[],
+        unit_type=unit_type,
+        text=text,
+        embedding=embedding,
+        assignment=Assignment.pending,
+    )
+    session.add(unit)
+    await session.flush()
+    return unit

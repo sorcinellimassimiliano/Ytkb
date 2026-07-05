@@ -8,14 +8,14 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ytkb.db import repository as repo
 from ytkb.db.base import get_session
-from ytkb.db.models import Channel, IngestStatus, Video
+from ytkb.db.models import Channel, IngestStatus, Topic, TopicStatus, Video
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -84,6 +84,32 @@ async def list_videos(
         }
         for v in result.scalars()
     ]
+
+
+@router.get("/topics/proposed")
+async def list_proposed_topics(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> list[dict]:
+    result = await session.execute(
+        select(Topic).where(Topic.status == TopicStatus.proposed).order_by(Topic.units_count.desc())
+    )
+    return [
+        {"id": t.id, "slug": t.slug, "title": t.title, "units_count": t.units_count}
+        for t in result.scalars()
+    ]
+
+
+@router.post("/topics/{topic_id}/approve")
+async def approve_topic(
+    topic_id: int,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> dict:
+    topic = await session.get(Topic, topic_id)
+    if topic is None:
+        raise HTTPException(status_code=404, detail="topic not found")
+    topic.status = TopicStatus.active
+    await session.commit()
+    return {"id": topic.id, "slug": topic.slug, "status": topic.status.value}
 
 
 @router.get("/stats")

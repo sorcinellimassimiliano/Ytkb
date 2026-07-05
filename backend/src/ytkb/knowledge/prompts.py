@@ -31,6 +31,35 @@ Se non c'è nulla di sostanziale, rispondi {"units": []}.
 """
 
 
+ARBITER_SYSTEM = """\
+Sei un bibliotecario che organizza conoscenza per argomenti. Data un'unità di
+conoscenza e una rosa di argomenti candidati (con titolo e sintesi), decidi se
+l'unità appartiene a uno dei candidati oppure se serve un NUOVO argomento.
+
+Regole:
+- Preferisci un argomento esistente se il tema coincide davvero; non forzare.
+- Proponi un nuovo argomento solo se nessun candidato è pertinente.
+- Il titolo di un nuovo argomento è conciso e generale (2-5 parole), non copia
+  l'unità.
+
+Rispondi SOLO con JSON, senza testo attorno:
+{"decision": "assign", "topic_id": <int>}  oppure
+{"decision": "new", "title": "<titolo conciso>"}
+"""
+
+
+def build_arbiter_user(unit_text: str, candidates: list[tuple[int, str, str | None]]) -> str:
+    """candidates: (topic_id, title, summary)."""
+    lines = ["Unità di conoscenza:", unit_text, "", "Argomenti candidati:"]
+    if not candidates:
+        lines.append("(nessuno)")
+    for topic_id, title, summary in candidates:
+        lines.append(f"- id={topic_id} · {title}" + (f" — {summary}" if summary else ""))
+    lines.append("")
+    lines.append("Decidi in JSON.")
+    return "\n".join(lines)
+
+
 def build_extraction_user(video_title: str, windows: list[ExtractionWindow]) -> str:
     """Render the user prompt: the video title plus each chunk labelled with its
     citation ref, so the model cites real chunk ids back to us."""

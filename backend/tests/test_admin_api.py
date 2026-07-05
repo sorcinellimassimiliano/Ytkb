@@ -55,3 +55,22 @@ async def test_admin_stats_shape(session):
         body = (await client.get("/admin/stats")).json()
     assert "videos_by_status" in body
     assert "pending" in body["videos_by_status"]
+
+
+async def test_approve_proposed_topic(session):
+    from ytkb.db.models import Topic, TopicStatus
+
+    topic = Topic(slug="t-approve", title="T", status=TopicStatus.proposed, units_count=1)
+    session.add(topic)
+    await session.flush()
+
+    async with _make_client(session) as client:
+        proposed = (await client.get("/admin/topics/proposed")).json()
+        assert any(t["slug"] == "t-approve" for t in proposed)
+
+        resp = await client.post(f"/admin/topics/{topic.id}/approve")
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "active"
+
+        missing = await client.post("/admin/topics/999999/approve")
+        assert missing.status_code == 404

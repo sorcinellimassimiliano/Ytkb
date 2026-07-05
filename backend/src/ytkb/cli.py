@@ -139,6 +139,22 @@ def extract_units(
 
 
 @app.command()
+def assign(limit: int = typer.Option(None, help="Max pending units to assign")) -> None:
+    """Assign pending knowledge units to topics (matcher + arbitration)."""
+    from ytkb.knowledge.assignment import assign_pending_units
+
+    async def _do() -> None:
+        async with get_sessionmaker()() as session:
+            res = await assign_pending_units(session, limit=limit)
+            await session.commit()
+            typer.echo(
+                f"Assigned {res['units_assigned']} units, created {res['topics_created']} topics."
+            )
+
+    _run(_do)
+
+
+@app.command()
 def search(
     query: str,
     mode: str = typer.Option("hybrid", help="hybrid | semantic | fts"),
