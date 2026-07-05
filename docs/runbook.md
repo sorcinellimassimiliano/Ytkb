@@ -41,6 +41,33 @@ SELECT id, text FROM chunks WHERE tsv @@ websearch_to_tsquery('italian', :q);
 SELECT id FROM chunks WHERE similarity(text, :q) > 0.1 ORDER BY similarity(text, :q) DESC;
 ```
 
+## ASR fallback (video senza sottotitoli)
+I video finiti in `no_transcript` possono essere trascritti in locale (CPU) o via
+cloud. Abilita un provider e installa l'extra:
+```bash
+pip install -e ".[asr]"          # faster-whisper (CPU int8)
+export ASR_PROVIDER=faster_whisper ASR_WHISPER_MODEL=small ASR_MAX_DURATION_S=1800
+ytkb asr --limit 20              # no_transcript → transcribed (poi: ytkb index ...)
+```
+È un job batch: gli Shorts (brevi) hanno priorità; oltre `ASR_MAX_DURATION_S` il
+video viene saltato. Con `ASR_PROVIDER=none` (default) il worker non fa nulla.
+
+## Osservabilità e costi
+```bash
+ytkb stats                       # video/unità/topic, failure rate, coda merge, costo stimato
+curl -s localhost:8000/admin/stats | jq
+curl -s localhost:8000/admin/costs | jq   # stima token/costo per ingestione
+```
+La stima costi deriva dai token contati sui chunk/unità e dai prezzi in config
+(`PRICE_*_PER_MTOK`): è un ordine di grandezza per il budget, non fatturazione.
+
+## Valutazione (baseline recall@k)
+Prepara un file gold `[{query, kind: topic|unit|chunk, contains}]` e misura se il
+risultato atteso è nel top-k prima di ottimizzare le soglie:
+```bash
+ytkb evaluate gold.json --k 5    # recall@5 = 0.87 (13/15) + elenco MISS
+```
+
 ## Backup / restore
 ```bash
 docker compose exec postgres pg_dump -U ytkb ytkb > backup.sql   # copre TUTTO

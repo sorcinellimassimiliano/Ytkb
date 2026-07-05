@@ -242,6 +242,20 @@ def search(
 
 
 @app.command()
+def asr(limit: int = typer.Option(None, help="Max no_transcript videos to process")) -> None:
+    """ASR fallback: transcribe videos without captions (no_transcript → transcribed)."""
+    from ytkb.ingestion.asr import transcribe_missing
+
+    async def _do() -> None:
+        async with get_sessionmaker()() as session:
+            n = await transcribe_missing(session, limit=limit)
+            await session.commit()
+            typer.echo(f"ASR transcribed {n} videos.")
+
+    _run(_do)
+
+
+@app.command()
 def status() -> None:
     """Show pipeline counts by ingest status."""
     from sqlalchemy import func, select
@@ -255,6 +269,42 @@ def status() -> None:
             )
             for st, count in rows:
                 typer.echo(f"{st.value:16s} {count}")
+
+    _run(_do)
+
+
+@app.command()
+def stats() -> None:
+    """Show knowledge-layer stats and estimated ingestion cost."""
+    from ytkb.observability.stats import cost_report, pipeline_stats
+
+    async def _do() -> None:
+        async with get_sessionmaker()() as session:
+            s = await pipeline_stats(session)
+            c = await cost_report(session)
+            for k, v in s.items():
+                typer.echo(f"{k:16s} {v}")
+            typer.echo(f"{'est_cost_usd':16s} {c['estimated_cost_usd']}")
+
+    _run(_do)
+
+
+@app.command()
+def evaluate(
+    gold_path: str = typer.Argument(..., help="Path to a gold questions JSON file"),
+    k: int = typer.Option(5, help="top-k"),
+) -> None:
+    """Run the evaluation harness (recall@k) against a gold set."""
+    from ytkb.observability.evaluation import evaluate as _evaluate
+    from ytkb.observability.evaluation import load_gold
+
+    async def _do() -> None:
+        gold = load_gold(gold_path)
+        async with get_sessionmaker()() as session:
+            res = await _evaluate(session, gold, k=k)
+            typer.echo(f"recall@{k} = {res.recall} ({res.hits}/{res.total})")
+            for miss in res.misses:
+                typer.echo(f"  MISS: {miss}")
 
     _run(_do)
 

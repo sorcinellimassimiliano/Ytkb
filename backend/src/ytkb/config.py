@@ -71,6 +71,11 @@ class Settings(BaseSettings):
     asr_whisper_model: str = "small"
     asr_max_duration_s: int = 1800
 
+    # --- Cost estimate (USD per 1M tokens; rough, for budget reports) -------
+    price_embedding_per_mtok: float = 0.02
+    price_extraction_per_mtok: float = 0.80  # Haiku input
+    price_merge_per_mtok: float = 3.0  # Sonnet input
+
     @property
     def sync_database_url(self) -> str:
         """Sync DSN (psycopg) for Alembic / tooling."""

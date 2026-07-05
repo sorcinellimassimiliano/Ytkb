@@ -37,8 +37,8 @@ o modelli locali piccoli; ASR fallback via `faster-whisper` int8 o cloud).
 | 4b | Merge incrementale articoli versionati + validatore citazioni + topics-review | ✅ completata |
 | 5 | KB browser senza LLM (albero, articoli+citazioni, versioni+diff, ricerca raggruppata, fonti) | ✅ completata |
 | 6 | Chat LLM opzionale (SSE, retrieval articoli→unità→chunk, citazioni, sessioni) | ✅ completata |
-| 7 | Fallback ASR CPU/cloud | ⬜ |
-| 8 | Hardening | ⬜ |
+| 7 | Fallback ASR CPU/cloud (worker no_transcript, faster-whisper/cloud, provider astratto) | ✅ completata |
+| 8 | Hardening (eval recall@k, report costi, /admin/stats esteso, runbook) | ✅ completata |
 
 Vedi [`docs/piano-progetto.md`](docs/piano-progetto.md) per il piano completo e
 [`docs/runbook.md`](docs/runbook.md) per le operazioni.
@@ -78,6 +78,9 @@ ytkb index --limit 50                 # chunk + embedding dei video trascritti
 ytkb reindex-video <yt_video_id>      # re-chunk + re-embed pulito di un video
 ytkb extract-units --limit 50         # estrae unità di conoscenza (embedded → units_extracted)
 ytkb assign --limit 200               # assegna le unità agli argomenti (matcher + arbitraggio)
+ytkb asr --limit 20                   # fallback ASR per video senza sottotitoli (no_transcript → transcribed)
+ytkb stats                            # stats knowledge-layer + costo stimato
+ytkb evaluate gold.json --k 5         # baseline recall@k su un gold set
 ytkb merge                            # fonde le nuove unità negli articoli-argomento (nuova versione)
 ytkb rebuild-topic <slug>             # re-sintesi pulita dell'articolo da tutte le unità
 ytkb topics-review                    # propone fusioni di argomenti quasi-duplicati (solo detection)

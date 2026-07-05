@@ -116,11 +116,23 @@ async def approve_topic(
 async def admin_stats(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict:
+    from ytkb.observability.stats import pipeline_stats
+
     rows = await session.execute(
         select(Video.ingest_status, func.count(Video.id)).group_by(Video.ingest_status)
     )
     by_status = {status.value: count for status, count in rows}
+    stats = await pipeline_stats(session)
     return {
         "videos_by_status": {s.value: by_status.get(s.value, 0) for s in IngestStatus},
-        "videos_total": sum(by_status.values()),
+        **stats,
     }
+
+
+@router.get("/costs")
+async def admin_costs(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> dict:
+    from ytkb.observability.stats import cost_report
+
+    return await cost_report(session)
