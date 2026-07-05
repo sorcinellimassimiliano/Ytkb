@@ -39,6 +39,11 @@ class Settings(BaseSettings):
     # --- Feature flags ------------------------------------------------------
     chat_enabled: bool = False
 
+    # --- Chat retrieval -----------------------------------------------------
+    chat_topic_k: int = 3
+    chat_unit_k: int = 6
+    chat_chunk_k: int = 6
+
     # --- Ingestion ----------------------------------------------------------
     transcript_languages: list[str] = ["it", "en"]
     yt_dlp_cookies_file: str | None = None

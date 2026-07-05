@@ -36,7 +36,7 @@ o modelli locali piccoli; ASR fallback via `faster-whisper` int8 o cloud).
 | 4a | Assegnazione argomenti (matcher kNN, soglie, arbitraggio, centroidi incrementali) | ✅ completata |
 | 4b | Merge incrementale articoli versionati + validatore citazioni + topics-review | ✅ completata |
 | 5 | KB browser senza LLM (albero, articoli+citazioni, versioni+diff, ricerca raggruppata, fonti) | ✅ completata |
-| 6 | Chat LLM opzionale | ⬜ |
+| 6 | Chat LLM opzionale (SSE, retrieval articoli→unità→chunk, citazioni, sessioni) | ✅ completata |
 | 7 | Fallback ASR CPU/cloud | ⬜ |
 | 8 | Hardening | ⬜ |
 

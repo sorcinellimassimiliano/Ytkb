@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import {
+  chatStream,
   getHealth,
   getSources,
   getTopic,
@@ -27,7 +28,8 @@ type Route =
   | { view: "topic"; slug: string }
   | { view: "search"; q: string }
   | { view: "sources" }
-  | { view: "video"; ytId: string };
+  | { view: "video"; ytId: string }
+  | { view: "chat" };
 
 function parseHash(): Route {
   const h = window.location.hash.replace(/^#\/?/, "");
@@ -37,6 +39,7 @@ function parseHash(): Route {
   if (head === "search" && tail) return { view: "search", q: decodeURIComponent(tail) };
   if (head === "video" && tail) return { view: "video", ytId: decodeURIComponent(tail) };
   if (head === "sources") return { view: "sources" };
+  if (head === "chat") return { view: "chat" };
   return { view: "home" };
 }
 
@@ -58,6 +61,7 @@ const go = (path: string) => {
 export function App() {
   const route = useRoute();
   const [q, setQ] = useState("");
+  const { data: health } = useAsync<Health>(getHealth, []);
 
   return (
     <div className="app">
@@ -68,6 +72,7 @@ export function App() {
         <nav>
           <a href="#/">Argomenti</a>
           <a href="#/sources">Fonti</a>
+          {health?.chat_enabled && <a href="#/chat">Chat</a>}
         </nav>
         <form
           className="searchbar"
@@ -90,9 +95,96 @@ export function App() {
         {route.view === "search" && <SearchView q={route.q} />}
         {route.view === "sources" && <SourcesView />}
         {route.view === "video" && <VideoView ytId={route.ytId} />}
+        {route.view === "chat" && <ChatView />}
       </main>
-      <Footer />
+      <Footer health={health} />
     </div>
+  );
+}
+
+interface ChatMsg {
+  role: "user" | "assistant";
+  content: string;
+  sources?: { label: string; kind: string; ref: string }[];
+}
+
+function ChatView() {
+  const [messages, setMessages] = useState<ChatMsg[]>([]);
+  const [input, setInput] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [sessionId, setSessionId] = useState<number | null>(null);
+
+  const send = async () => {
+    const text = input.trim();
+    if (!text || busy) return;
+    setInput("");
+    setBusy(true);
+    setMessages((m) => [...m, { role: "user", content: text }, { role: "assistant", content: "" }]);
+    try {
+      await chatStream(text, sessionId, (e) => {
+        if (e.type === "session" && e.session_id != null) setSessionId(e.session_id);
+        else if (e.type === "token" && e.text) {
+          setMessages((m) => {
+            const copy = [...m];
+            copy[copy.length - 1] = {
+              ...copy[copy.length - 1],
+              content: copy[copy.length - 1].content + e.text,
+            };
+            return copy;
+          });
+        } else if (e.type === "done") {
+          setMessages((m) => {
+            const copy = [...m];
+            copy[copy.length - 1] = { ...copy[copy.length - 1], sources: e.sources };
+            return copy;
+          });
+        }
+      });
+    } catch (err) {
+      setMessages((m) => {
+        const copy = [...m];
+        copy[copy.length - 1] = { role: "assistant", content: `Errore: ${String(err)}` };
+        return copy;
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section>
+      <h1>Chat</h1>
+      <p className="muted">Risposte basate solo sulla knowledge base, con citazioni.</p>
+      <div className="chat">
+        {messages.map((m, i) => (
+          <div key={i} className={`msg msg-${m.role}`}>
+            <div className="msg-body">{m.content || (busy && i === messages.length - 1 ? "…" : "")}</div>
+            {m.sources && m.sources.length > 0 && (
+              <div className="msg-sources muted">
+                Fonti: {m.sources.map((s) => s.label).join(" · ")}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+      <form
+        className="chat-input"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void send();
+        }}
+      >
+        <input
+          placeholder="Fai una domanda…"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          disabled={busy}
+        />
+        <button type="submit" disabled={busy}>
+          Invia
+        </button>
+      </form>
+    </section>
   );
 }
 
@@ -360,13 +452,12 @@ function VideoView({ ytId }: { ytId: string }) {
   );
 }
 
-function Footer() {
-  const { data } = useAsync<Health>(getHealth, []);
-  if (!data) return null;
+function Footer({ health }: { health: Health | null }) {
+  if (!health) return null;
   return (
     <footer>
-      YT-KB v{data.version} · DB {data.db} · embedding {data.embedding_dim} · chat{" "}
-      {data.chat_enabled ? "on" : "off"}
+      YT-KB v{health.version} · DB {health.db} · embedding {health.embedding_dim} · chat{" "}
+      {health.chat_enabled ? "on" : "off"}
     </footer>
   );
 }

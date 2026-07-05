@@ -96,6 +96,46 @@ export const search = (q: string) => get<SearchResults>(`/kb/search?q=${encodeUR
 export const getSources = () => get<Source[]>("/kb/sources");
 export const getVideo = (ytId: string) => get<VideoPage>(`/kb/videos/${encodeURIComponent(ytId)}`);
 
+export interface ChatEvent {
+  type: "session" | "token" | "done";
+  session_id?: number;
+  text?: string;
+  sources?: { label: string; kind: string; ref: string }[];
+}
+
+export async function chatStream(
+  message: string,
+  sessionId: number | null,
+  onEvent: (e: ChatEvent) => void,
+): Promise<void> {
+  const res = await fetch(`${BASE}/chat`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ message, session_id: sessionId }),
+  });
+  if (!res.ok || !res.body) throw new Error(`${res.status} ${res.statusText}`);
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  let buf = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let idx: number;
+    while ((idx = buf.indexOf("\n\n")) >= 0) {
+      const line = buf.slice(0, idx);
+      buf = buf.slice(idx + 2);
+      if (line.startsWith("data:")) {
+        try {
+          onEvent(JSON.parse(line.slice(5).trim()) as ChatEvent);
+        } catch {
+          /* ignore malformed frame */
+        }
+      }
+    }
+  }
+}
+
 export function youtubeUrl(ytVideoId: string, startS?: number): string {
   const base = `https://www.youtube.com/watch?v=${ytVideoId}`;
   return startS != null ? `${base}&t=${Math.floor(startS)}s` : base;
