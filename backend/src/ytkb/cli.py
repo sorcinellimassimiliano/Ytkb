@@ -25,7 +25,13 @@ T = TypeVar("T")
 
 def _run(coro: Callable[[], Coroutine[Any, Any, T]]) -> T:
     configure_logging()
-    return asyncio.run(coro())
+    try:
+        return asyncio.run(coro())
+    except Exception as exc:
+        # Surface network / provider failures as a clean CLI error, not a
+        # traceback. Rate limiting from datacenter IPs is expected here.
+        typer.secho(f"Error: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(1) from exc
 
 
 @app.command()
@@ -47,6 +53,7 @@ def ingest(
     handle_or_id: str = typer.Argument(None, help="Channel to ingest; omit for all active"),
     limit: int = typer.Option(None, help="Max videos to discover per channel"),
     transcribe: bool = typer.Option(True, help="Fetch transcripts for pending videos"),
+    retry_errors: bool = typer.Option(False, help="Also retry videos in 'error' state"),
 ) -> None:
     """Discover videos for a channel and fetch transcripts."""
 
@@ -60,10 +67,190 @@ def ingest(
                 typer.echo(f"Discovered {len(new)} new videos.")
             if transcribe:
                 n = await transcribe_pending(
-                    session, provider, languages=settings.transcript_languages, limit=limit
+                    session,
+                    provider,
+                    languages=settings.transcript_languages,
+                    limit=limit,
+                    include_errors=retry_errors,
                 )
                 typer.echo(f"Transcribed {n} videos.")
             await session.commit()
+
+    _run(_do)
+
+
+@app.command()
+def scan() -> None:
+    """Run one channel scan now (discover + transcribe for all active channels)."""
+    from ytkb.ingestion.scheduler import scan_all_channels
+
+    async def _do() -> None:
+        await scan_all_channels()
+        typer.echo("Scan complete.")
+
+    _run(_do)
+
+
+@app.command()
+def index(limit: int = typer.Option(None, help="Max transcribed videos to process")) -> None:
+    """Chunk + embed all transcribed videos (transcribed → chunked → embedded)."""
+    from ytkb.indexing.pipeline import index_transcribed
+
+    async def _do() -> None:
+        async with get_sessionmaker()() as session:
+            totals = await index_transcribed(session, limit=limit)
+            await session.commit()
+            typer.echo(
+                f"Indexed {totals['videos']} videos, "
+                f"{totals['chunks']} chunks, {totals['embedded']} embeddings."
+            )
+
+    _run(_do)
+
+
+@app.command()
+def reindex_video(yt_video_id: str) -> None:
+    """Force a clean re-chunk + re-embed of a single video."""
+    from ytkb.indexing.pipeline import reindex_video as _reindex
+
+    async def _do() -> None:
+        async with get_sessionmaker()() as session:
+            res = await _reindex(session, yt_video_id)
+            await session.commit()
+            typer.echo(f"{res['video']}: {res['chunks']} chunks, {res['embedded']} embeddings.")
+
+    _run(_do)
+
+
+@app.command()
+def extract_units(
+    limit: int = typer.Option(None, help="Max embedded videos to process"),
+) -> None:
+    """Extract knowledge units from embedded videos (embedded → units_extracted)."""
+    from ytkb.knowledge.extraction import extract_pending
+
+    async def _do() -> None:
+        async with get_sessionmaker()() as session:
+            totals = await extract_pending(session, limit=limit)
+            await session.commit()
+            typer.echo(f"Extracted {totals['units']} units from {totals['videos']} videos.")
+
+    _run(_do)
+
+
+@app.command()
+def assign(limit: int = typer.Option(None, help="Max pending units to assign")) -> None:
+    """Assign pending knowledge units to topics (matcher + arbitration)."""
+    from ytkb.knowledge.assignment import assign_pending_units
+
+    async def _do() -> None:
+        async with get_sessionmaker()() as session:
+            res = await assign_pending_units(session, limit=limit)
+            await session.commit()
+            typer.echo(
+                f"Assigned {res['units_assigned']} units, created {res['topics_created']} topics."
+            )
+
+    _run(_do)
+
+
+@app.command()
+def merge() -> None:
+    """Merge new units into topic articles (dirty topics → new article version)."""
+    from ytkb.knowledge.merge import merge_dirty_topics
+
+    async def _do() -> None:
+        async with get_sessionmaker()() as session:
+            res = await merge_dirty_topics(session)
+            await session.commit()
+            typer.echo(f"Merged {res['topics_merged']} topics.")
+
+    _run(_do)
+
+
+@app.command()
+def rebuild_topic(slug: str) -> None:
+    """Re-synthesize a topic's article from scratch (new version, all units)."""
+    from ytkb.knowledge.merge import rebuild_topic as _rebuild
+
+    async def _do() -> None:
+        async with get_sessionmaker()() as session:
+            article = await _rebuild(session, slug)
+            await session.commit()
+            if article is None:
+                typer.echo(f"{slug}: no units to rebuild.")
+            else:
+                typer.echo(f"{slug}: rebuilt as version {article.version}.")
+
+    _run(_do)
+
+
+@app.command()
+def topics_review() -> None:
+    """Propose merges for near-duplicate topics (detection only)."""
+    from ytkb.knowledge.review import find_similar_topics
+
+    async def _do() -> None:
+        async with get_sessionmaker()() as session:
+            pairs = await find_similar_topics(session)
+            if not pairs:
+                typer.echo("No near-duplicate topics found.")
+            for p in pairs:
+                typer.echo(f"{p.similarity:.3f}  {p.topic_a_slug}  ~  {p.topic_b_slug}")
+
+    _run(_do)
+
+
+@app.command()
+def merge_topics(from_slug: str, into_slug: str) -> None:
+    """Manually merge one topic into another, remapping its units."""
+    from ytkb.knowledge.review import merge_topics as _merge_topics
+
+    async def _do() -> None:
+        async with get_sessionmaker()() as session:
+            res = await _merge_topics(session, from_slug, into_slug)
+            await session.commit()
+            typer.echo(f"Remapped {res['units_remapped']} units: {from_slug} → {into_slug}.")
+
+    _run(_do)
+
+
+@app.command()
+def search(
+    query: str,
+    mode: str = typer.Option("hybrid", help="hybrid | semantic | fts"),
+    limit: int = typer.Option(10),
+) -> None:
+    """Search transcript chunks from the CLI (no LLM)."""
+    from ytkb.db import search as search_svc
+    from ytkb.indexing.embeddings import get_embedding_client
+
+    async def _do() -> None:
+        async with get_sessionmaker()() as session:
+            if mode == "fts":
+                hits = await search_svc.fts_chunks(session, query, limit=limit)
+            else:
+                vec = await get_embedding_client().embed_one(query)
+                if mode == "semantic":
+                    hits = await search_svc.semantic_chunks(session, vec, limit=limit)
+                else:
+                    hits = await search_svc.hybrid_chunks(session, query, vec, limit=limit)
+            for h in hits:
+                typer.echo(f"[{h.score:.4f}] v{h.video_id} {h.start_s:.0f}s  {h.text[:80]}")
+
+    _run(_do)
+
+
+@app.command()
+def asr(limit: int = typer.Option(None, help="Max no_transcript videos to process")) -> None:
+    """ASR fallback: transcribe videos without captions (no_transcript → transcribed)."""
+    from ytkb.ingestion.asr import transcribe_missing
+
+    async def _do() -> None:
+        async with get_sessionmaker()() as session:
+            n = await transcribe_missing(session, limit=limit)
+            await session.commit()
+            typer.echo(f"ASR transcribed {n} videos.")
 
     _run(_do)
 
@@ -82,6 +269,42 @@ def status() -> None:
             )
             for st, count in rows:
                 typer.echo(f"{st.value:16s} {count}")
+
+    _run(_do)
+
+
+@app.command()
+def stats() -> None:
+    """Show knowledge-layer stats and estimated ingestion cost."""
+    from ytkb.observability.stats import cost_report, pipeline_stats
+
+    async def _do() -> None:
+        async with get_sessionmaker()() as session:
+            s = await pipeline_stats(session)
+            c = await cost_report(session)
+            for k, v in s.items():
+                typer.echo(f"{k:16s} {v}")
+            typer.echo(f"{'est_cost_usd':16s} {c['estimated_cost_usd']}")
+
+    _run(_do)
+
+
+@app.command()
+def evaluate(
+    gold_path: str = typer.Argument(..., help="Path to a gold questions JSON file"),
+    k: int = typer.Option(5, help="top-k"),
+) -> None:
+    """Run the evaluation harness (recall@k) against a gold set."""
+    from ytkb.observability.evaluation import evaluate as _evaluate
+    from ytkb.observability.evaluation import load_gold
+
+    async def _do() -> None:
+        gold = load_gold(gold_path)
+        async with get_sessionmaker()() as session:
+            res = await _evaluate(session, gold, k=k)
+            typer.echo(f"recall@{k} = {res.recall} ({res.hits}/{res.total})")
+            for miss in res.misses:
+                typer.echo(f"  MISS: {miss}")
 
     _run(_do)
 

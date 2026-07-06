@@ -43,6 +43,34 @@ def _parse_upload_date(value: str | None) -> datetime | None:
         return None
 
 
+def _choose_transcript(transcript_list, languages: list[str]):
+    """Pick the best transcript: manual in a preferred language beats auto;
+    otherwise translate any available transcript into the first preference.
+
+    Kept as a pure function (no network) so the selection policy is unit-tested.
+    Returns the chosen transcript object or None.
+    """
+    manual, auto = None, None
+    for t in transcript_list:
+        if t.language_code not in languages:
+            continue
+        if t.is_generated:
+            auto = auto or t
+        else:
+            manual = manual or t
+    chosen = manual or auto
+    if chosen is not None:
+        return chosen
+    # No preferred-language transcript: fall back to translating whatever exists.
+    try:
+        any_t = next(iter(transcript_list))
+    except StopIteration:
+        return None
+    if languages and getattr(any_t, "is_translatable", False):
+        return any_t.translate(languages[0])
+    return any_t
+
+
 class YouTubeProvider(SourceProvider):
     name = "youtube"
 
@@ -114,7 +142,6 @@ class YouTubeProvider(SourceProvider):
         self, provider_video_id: str, *, languages: list[str]
     ) -> TranscriptResult | None:
         from youtube_transcript_api import (
-            NoTranscriptFound,
             TranscriptsDisabled,
             YouTubeTranscriptApi,
         )
@@ -127,24 +154,9 @@ class YouTubeProvider(SourceProvider):
         except Exception as exc:  # network / rate limit
             raise TranscriptRateLimited(str(exc)) from exc
 
-        manual, auto = None, None
-        for t in transcript_list:
-            if t.language_code not in languages:
-                continue
-            if t.is_generated:
-                auto = auto or t
-            else:
-                manual = manual or t
-        chosen = manual or auto
+        chosen = _choose_transcript(transcript_list, languages)
         if chosen is None:
-            # Fall back to translating an available transcript into the first pref.
-            try:
-                any_t = next(iter(transcript_list))
-                chosen = (
-                    any_t.translate(languages[0]) if languages and any_t.is_translatable else any_t
-                )
-            except (StopIteration, NoTranscriptFound):
-                return None
+            return None
 
         source = TranscriptSource.yt_auto if chosen.is_generated else TranscriptSource.yt_manual
         try:

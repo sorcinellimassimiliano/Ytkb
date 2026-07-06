@@ -1,0 +1,5 @@
+[
+  { "query": "context management token", "kind": "chunk", "contains": "context management" },
+  { "query": "prompt caching contesto", "kind": "chunk", "contains": "prompt caching" },
+  { "query": "riassumere messaggi vecchi", "kind": "unit", "contains": "riassumere" }
+]

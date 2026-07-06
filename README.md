@@ -30,14 +30,15 @@ o modelli locali piccoli; ASR fallback via `faster-whisper` int8 o cloud).
 | Fase | Descrizione | Stato |
 |---|---|---|
 | 0 | Bootstrap: monorepo, Docker Compose, schema completo (Alembic), `/health`, CI | ✅ completata |
-| 1 | Ingestion fonte (YouTube provider, trascrizioni, scheduler, CLI) | 🟡 fondamenta pronte |
-| 2 | Chunking timestamp-aware + embedding su pgvector | 🟡 chunker + client embedding pronti |
-| 3 | Estrazione unità di conoscenza (Haiku) | ⬜ |
-| 4 | Assegnazione argomenti + merge incrementale | ⬜ |
-| 5 | KB browser senza LLM | 🟡 scaffold API + frontend |
-| 6 | Chat LLM opzionale | ⬜ |
-| 7 | Fallback ASR CPU/cloud | ⬜ |
-| 8 | Hardening | ⬜ |
+| 1 | Ingestion fonte (YouTube provider, trascrizioni, service idempotente, scheduler, CLI) | ✅ completata |
+| 2 | Chunking timestamp-aware + embedding su pgvector + ricerca kNN/FTS/ibrida | ✅ completata |
+| 3 | Estrazione unità di conoscenza (LLM astratto + euristico offline, golden test) | ✅ completata |
+| 4a | Assegnazione argomenti (matcher kNN, soglie, arbitraggio, centroidi incrementali) | ✅ completata |
+| 4b | Merge incrementale articoli versionati + validatore citazioni + topics-review | ✅ completata |
+| 5 | KB browser senza LLM (albero, articoli+citazioni, versioni+diff, ricerca raggruppata, fonti) | ✅ completata |
+| 6 | Chat LLM opzionale (SSE, retrieval articoli→unità→chunk, citazioni, sessioni) | ✅ completata |
+| 7 | Fallback ASR CPU/cloud (worker no_transcript, faster-whisper/cloud, provider astratto) | ✅ completata |
+| 8 | Hardening (eval recall@k, report costi, /admin/stats esteso, runbook) | ✅ completata |
 
 Vedi [`docs/piano-progetto.md`](docs/piano-progetto.md) per il piano completo e
 [`docs/runbook.md`](docs/runbook.md) per le operazioni.
@@ -69,11 +70,30 @@ uvicorn ytkb.api.app:app --reload
 ## CLI
 
 ```bash
-ytkb add-channel @creator        # registra un canale
-ytkb ingest @creator --limit 20  # scopre video + scarica trascrizioni
-ytkb status                      # conteggi pipeline per stato
-ytkb scheduler                   # scan notturni in-process (APScheduler)
+ytkb add-channel @creator             # registra un canale
+ytkb ingest @creator --limit 20       # scopre video + scarica trascrizioni
+ytkb ingest @creator --retry-errors   # riprova i video andati in errore
+ytkb scan                             # una scansione ora per tutti i canali attivi
+ytkb index --limit 50                 # chunk + embedding dei video trascritti
+ytkb reindex-video <yt_video_id>      # re-chunk + re-embed pulito di un video
+ytkb extract-units --limit 50         # estrae unità di conoscenza (embedded → units_extracted)
+ytkb assign --limit 200               # assegna le unità agli argomenti (matcher + arbitraggio)
+ytkb asr --limit 20                   # fallback ASR per video senza sottotitoli (no_transcript → transcribed)
+ytkb stats                            # stats knowledge-layer + costo stimato
+ytkb evaluate gold.json --k 5         # baseline recall@k su un gold set
+ytkb merge                            # fonde le nuove unità negli articoli-argomento (nuova versione)
+ytkb rebuild-topic <slug>             # re-sintesi pulita dell'articolo da tutte le unità
+ytkb topics-review                    # propone fusioni di argomenti quasi-duplicati (solo detection)
+ytkb merge-topics <from> <into>       # fusione manuale di argomenti con remap unità
+ytkb search "prompt caching" --mode hybrid   # ricerca chunk (fts|semantic|hybrid)
+ytkb status                           # conteggi pipeline per stato
+ytkb scheduler                        # scan notturni in-process (APScheduler)
 ```
+
+> **Nota rete**: l'ingestione live richiede accesso a `youtube.com`. In ambienti
+> con IP datacenter YouTube applica rate limiting: configura `YT_DLP_COOKIES_FILE`
+> / `YT_DLP_PROXY`. La macchina a stati e l'idempotenza della pipeline sono
+> coperte da test di integrazione contro Postgres reale (provider fittizio).
 
 ## Qualità
 

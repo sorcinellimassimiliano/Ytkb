@@ -1,0 +1,20 @@
+{
+  "video_title": "La vera carbonara romana",
+  "segments": [
+    {
+      "start_s": 0.0,
+      "end_s": 10.0,
+      "text": "La carbonara romana si prepara con uova guanciale e pecorino, la panna non entra nella ricetta originale. Secondo me la versione senza aglio resta la piu fedele alla tradizione."
+    },
+    {
+      "start_s": 10.0,
+      "end_s": 22.0,
+      "text": "Prima rosola il guanciale a fuoco medio, poi manteca le uova fuori dal fuoco per evitare la frittata. Per esempio puoi sostituire il guanciale con la pancetta soltanto se proprio non lo trovi."
+    }
+  ],
+  "expected": {
+    "min_units": 4,
+    "types_present": ["claim", "opinion", "workflow", "example"],
+    "must_exclude_substrings": []
+  }
+}

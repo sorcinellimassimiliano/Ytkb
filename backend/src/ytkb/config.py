@@ -39,6 +39,11 @@ class Settings(BaseSettings):
     # --- Feature flags ------------------------------------------------------
     chat_enabled: bool = False
 
+    # --- Chat retrieval -----------------------------------------------------
+    chat_topic_k: int = 3
+    chat_unit_k: int = 6
+    chat_chunk_k: int = 6
+
     # --- Ingestion ----------------------------------------------------------
     transcript_languages: list[str] = ["it", "en"]
     yt_dlp_cookies_file: str | None = None
@@ -50,15 +55,26 @@ class Settings(BaseSettings):
     chunk_target_tokens: int = 500
     chunk_overlap_ratio: float = 0.15
 
+    # --- Knowledge unit extraction -----------------------------------------
+    extraction_window_size: int = 4  # chunks per extraction window
+    extraction_min_confidence: float = 0.35
+    unit_near_dup_threshold: float = 0.93  # cosine similarity to treat as dup
+
     # --- Topic assignment thresholds ---------------------------------------
     theta_high: float = 0.82
     theta_low: float = 0.62
     topic_promote_after_units: int = 5
+    topic_similarity_review_threshold: float = 0.9  # centroid sim to propose merge
 
     # --- ASR fallback -------------------------------------------------------
     asr_provider: Literal["faster_whisper", "assemblyai", "openai", "none"] = "none"
     asr_whisper_model: str = "small"
     asr_max_duration_s: int = 1800
+
+    # --- Cost estimate (USD per 1M tokens; rough, for budget reports) -------
+    price_embedding_per_mtok: float = 0.02
+    price_extraction_per_mtok: float = 0.80  # Haiku input
+    price_merge_per_mtok: float = 3.0  # Sonnet input
 
     @property
     def sync_database_url(self) -> str:
